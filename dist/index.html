@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>StealthLAN - AI-Powered Offline Chat</title>
+    <script>
+      // Initialize theme before page loads to prevent flash
+      if (localStorage.theme === 'light' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: light)').matches)) {
+        document.documentElement.classList.remove('dark')
+      } else {
+        document.documentElement.classList.add('dark')
+      }
+    </script>
+    <script type="module" crossorigin src="/assets/index-DLg6lM_r.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-CuYSodAI.css">
+  </head>
+  <body class="dark:bg-slate-900 bg-white">
+    <div id="root"></div>
+  </body>
+</html>
