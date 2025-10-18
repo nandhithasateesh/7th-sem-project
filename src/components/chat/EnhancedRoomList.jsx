@@ -21,7 +21,7 @@ import {
   Shield
 } from 'lucide-react'
 
-const EnhancedRoomList = ({ socket, onRoomSelect, currentRoom, mode, onShowDashboard, showDashboard }) => {
+const EnhancedRoomList = ({ socket, onRoomSelect, currentRoom, mode, onShowDashboard, showDashboard, theme = 'dark' }) => {
   const [rooms, setRooms] = useState([])
   const [userRooms, setUserRooms] = useState([]) // Rooms user is in (created + joined)
   const [availableRooms, setAvailableRooms] = useState([]) // Rooms user hasn't joined
@@ -380,7 +380,9 @@ const EnhancedRoomList = ({ socket, onRoomSelect, currentRoom, mode, onShowDashb
         className={`p-3 rounded-lg transition-colors cursor-pointer ${
           currentRoom?.id === room.id
             ? 'bg-primary text-white'
-            : 'bg-slate-700 hover:bg-slate-600 text-gray-300'
+            : (theme === 'dark' 
+                ? 'bg-slate-700 hover:bg-slate-600 text-gray-300' 
+                : 'bg-gray-100 hover:bg-gray-200 text-gray-700')
         }`}
       >
         <div className="flex items-start justify-between">
@@ -415,26 +417,42 @@ const EnhancedRoomList = ({ socket, onRoomSelect, currentRoom, mode, onShowDashb
   }
 
   return (
-    <div className="w-full md:w-80 bg-slate-800 border-r border-slate-700 flex flex-col h-full">
+    <div className={`w-full md:w-80 border-r flex flex-col h-full ${
+      theme === 'dark' 
+        ? 'bg-slate-800 border-slate-700' 
+        : 'bg-white border-gray-200'
+    }`}>
       {/* Header - Mobile Optimized */}
-      <div className="p-3 sm:p-4 border-b border-slate-700 flex-shrink-0">
+      <div className={`p-3 sm:p-4 border-b flex-shrink-0 ${
+        theme === 'dark' ? 'border-slate-700' : 'border-gray-200'
+      }`}>
         <div className="flex items-center gap-2 mb-3 sm:mb-4">
           <Home className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
-          <h2 className="text-base sm:text-lg font-semibold text-white">Room Manager</h2>
+          <h2 className={`text-base sm:text-lg font-semibold ${
+            theme === 'dark' ? 'text-white' : 'text-gray-900'
+          }`}>Room Manager</h2>
         </div>
         
         {/* Quick Actions - Mobile Grid */}
         <div className="grid grid-cols-2 gap-2 mb-3 sm:mb-4">
           <button
             onClick={() => setShowCreateModal(true)}
-            className="bg-primary hover:bg-primary/80 text-white px-2 sm:px-3 py-2 rounded-lg transition-colors flex items-center justify-center gap-1 sm:gap-2 text-xs sm:text-sm"
+            className={`text-white px-2 sm:px-3 py-2 rounded-lg transition-colors flex items-center justify-center gap-1 sm:gap-2 text-xs sm:text-sm ${
+              theme === 'dark' 
+                ? 'bg-primary hover:bg-primary/80' 
+                : 'bg-blue-600 hover:bg-blue-700'
+            }`}
           >
             <Plus className="w-3 h-3 sm:w-4 sm:h-4" />
             <span className="hidden sm:inline">Create</span>
           </button>
           <button
             onClick={() => setShowJoinModal(true)}
-            className="bg-blue-600 hover:bg-blue-500 text-white px-2 sm:px-3 py-2 rounded-lg transition-colors flex items-center justify-center gap-1 sm:gap-2 text-xs sm:text-sm"
+            className={`text-white px-2 sm:px-3 py-2 rounded-lg transition-colors flex items-center justify-center gap-1 sm:gap-2 text-xs sm:text-sm ${
+              theme === 'dark' 
+                ? 'bg-blue-600 hover:bg-blue-500' 
+                : 'bg-green-600 hover:bg-green-700'
+            }`}
           >
             <LogIn className="w-3 h-3 sm:w-4 sm:h-4" />
             <span className="hidden sm:inline">Join</span>
@@ -448,8 +466,8 @@ const EnhancedRoomList = ({ socket, onRoomSelect, currentRoom, mode, onShowDashb
           onClick={() => onShowDashboard(!showDashboard)}
           className={`w-full flex items-center justify-center gap-2 p-3 rounded-lg transition-colors ${
             showDashboard 
-              ? 'bg-purple-600 text-white' 
-              : 'bg-slate-700 hover:bg-slate-600 text-gray-300'
+              ? (theme === 'dark' ? 'bg-purple-600 text-white' : 'bg-purple-500 text-white')
+              : (theme === 'dark' ? 'bg-slate-700 hover:bg-slate-600 text-gray-300' : 'bg-gray-100 hover:bg-gray-200 text-gray-700')
           }`}
         >
           <LayoutDashboard className="w-4 h-4" />
@@ -463,16 +481,26 @@ const EnhancedRoomList = ({ socket, onRoomSelect, currentRoom, mode, onShowDashb
         <div className="p-2">
           <button
             onClick={() => toggleSection('dashboard')}
-            className="w-full flex items-center justify-between p-3 bg-slate-700/50 hover:bg-slate-700 rounded-lg transition-colors mb-2"
+            className={`w-full flex items-center justify-between p-3 rounded-lg transition-colors mb-2 ${
+              theme === 'dark' 
+                ? 'bg-slate-700/50 hover:bg-slate-700' 
+                : 'bg-gray-50 hover:bg-gray-100'
+            }`}
           >
             <div className="flex items-center gap-2">
               <Home className="w-4 h-4 text-blue-400" />
-              <span className="text-sm font-semibold text-white">My Rooms ({filteredUserRooms.length})</span>
+              <span className={`text-sm font-semibold ${
+                theme === 'dark' ? 'text-white' : 'text-gray-900'
+              }`}>My Rooms ({filteredUserRooms.length})</span>
             </div>
             {expandedSections.dashboard ? (
-              <ChevronDown className="w-4 h-4 text-gray-400" />
+              <ChevronDown className={`w-4 h-4 ${
+                theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
+              }`} />
             ) : (
-              <ChevronRight className="w-4 h-4 text-gray-400" />
+              <ChevronRight className={`w-4 h-4 ${
+                theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
+              }`} />
             )}
           </button>
 
@@ -485,7 +513,9 @@ const EnhancedRoomList = ({ socket, onRoomSelect, currentRoom, mode, onShowDashb
                 className="space-y-2 mb-4"
               >
                 {filteredUserRooms.length === 0 ? (
-                  <div className="p-4 text-center text-gray-400">
+                  <div className={`p-4 text-center ${
+                    theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
+                  }`}>
                     <p className="text-sm">No rooms joined yet</p>
                     <p className="text-xs mt-1">Create or join a room to get started!</p>
                   </div>
@@ -503,16 +533,26 @@ const EnhancedRoomList = ({ socket, onRoomSelect, currentRoom, mode, onShowDashb
         <div className="p-2">
           <button
             onClick={() => toggleSection('available')}
-            className="w-full flex items-center justify-between p-3 bg-slate-700/50 hover:bg-slate-700 rounded-lg transition-colors mb-2"
+            className={`w-full flex items-center justify-between p-3 rounded-lg transition-colors mb-2 ${
+              theme === 'dark' 
+                ? 'bg-slate-700/50 hover:bg-slate-700' 
+                : 'bg-gray-50 hover:bg-gray-100'
+            }`}
           >
             <div className="flex items-center gap-2">
               <Globe className="w-4 h-4 text-green-400" />
-              <span className="text-sm font-semibold text-white">Available Rooms ({filteredAvailableRooms.length})</span>
+              <span className={`text-sm font-semibold ${
+                theme === 'dark' ? 'text-white' : 'text-gray-900'
+              }`}>Available Rooms ({filteredAvailableRooms.length})</span>
             </div>
             {expandedSections.available ? (
-              <ChevronDown className="w-4 h-4 text-gray-400" />
+              <ChevronDown className={`w-4 h-4 ${
+                theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
+              }`} />
             ) : (
-              <ChevronRight className="w-4 h-4 text-gray-400" />
+              <ChevronRight className={`w-4 h-4 ${
+                theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
+              }`} />
             )}
           </button>
 
@@ -525,7 +565,9 @@ const EnhancedRoomList = ({ socket, onRoomSelect, currentRoom, mode, onShowDashb
                 className="space-y-2"
               >
                 {filteredAvailableRooms.length === 0 ? (
-                  <div className="p-4 text-center text-gray-400">
+                  <div className={`p-4 text-center ${
+                    theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
+                  }`}>
                     <p className="text-sm">No available rooms</p>
                     <p className="text-xs mt-1">All rooms are either joined or none exist</p>
                   </div>
@@ -557,7 +599,9 @@ const EnhancedRoomList = ({ socket, onRoomSelect, currentRoom, mode, onShowDashb
               onClick={(e) => e.stopPropagation()}
               className="bg-slate-800 rounded-xl p-6 w-full max-w-md border border-slate-700"
             >
-              <h3 className="text-xl font-bold text-white mb-4">Create Room</h3>
+              <h3 className={`text-xl font-bold mb-4 ${
+                theme === 'dark' ? 'text-white' : 'text-gray-900'
+              }`}>Create Room</h3>
 
               {createError && (
                 <div className="bg-red-500/20 border border-red-500 rounded-lg p-3 mb-4">
@@ -586,7 +630,11 @@ const EnhancedRoomList = ({ socket, onRoomSelect, currentRoom, mode, onShowDashb
                   <textarea
                     value={newRoom.description}
                     onChange={(e) => setNewRoom({ ...newRoom, description: e.target.value })}
-                    className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white placeholder-gray-400 focus:outline-none focus:border-primary resize-none"
+                    className={`w-full border rounded-lg px-4 py-2 focus:outline-none focus:border-primary resize-none ${
+                      theme === 'dark' 
+                        ? 'bg-slate-700 border-slate-600 text-white placeholder-gray-400' 
+                        : 'bg-gray-50 border-gray-300 text-gray-900 placeholder-gray-500'
+                    }`}
                     rows="2"
                     placeholder="Optional description"
                   />
@@ -634,7 +682,9 @@ const EnhancedRoomList = ({ socket, onRoomSelect, currentRoom, mode, onShowDashb
                     onChange={(e) => setNewRoom({ ...newRoom, burnAfterReading: e.target.checked })}
                     className="w-4 h-4 text-primary bg-slate-700 border-slate-600 rounded focus:ring-primary"
                   />
-                  <label htmlFor="burnAfterReading" className="text-sm text-gray-300 flex items-center gap-2">
+                  <label htmlFor="burnAfterReading" className={`text-sm flex items-center gap-2 ${
+                    theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
+                  }`}>
                     <Flame className="w-4 h-4 text-orange-500" />
                     Burn After Reading
                   </label>
@@ -678,7 +728,9 @@ const EnhancedRoomList = ({ socket, onRoomSelect, currentRoom, mode, onShowDashb
               onClick={(e) => e.stopPropagation()}
               className="bg-slate-800 rounded-xl p-6 w-full max-w-md border border-slate-700"
             >
-              <h3 className="text-xl font-bold text-white mb-4">Join Room</h3>
+              <h3 className={`text-xl font-bold mb-4 ${
+                theme === 'dark' ? 'text-white' : 'text-gray-900'
+              }`}>Join Room</h3>
 
               {joinError && (
                 <div className="bg-red-500/20 border border-red-500 rounded-lg p-3 mb-4">
@@ -695,7 +747,11 @@ const EnhancedRoomList = ({ socket, onRoomSelect, currentRoom, mode, onShowDashb
                     type="text"
                     value={joinRoomId}
                     onChange={(e) => setJoinRoomId(e.target.value)}
-                    className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white placeholder-gray-400 focus:outline-none focus:border-primary font-mono"
+                    className={`w-full border rounded-lg px-4 py-2 focus:outline-none focus:border-primary font-mono ${
+                      theme === 'dark' 
+                        ? 'bg-slate-700 border-slate-600 text-white placeholder-gray-400' 
+                        : 'bg-gray-50 border-gray-300 text-gray-900 placeholder-gray-500'
+                    }`}
                     placeholder="Enter room ID or name"
                   />
                 </div>

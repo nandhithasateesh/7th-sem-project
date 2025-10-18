@@ -189,6 +189,7 @@ const NormalMode = () => {
               mode="normal"
               onShowDashboard={setShowDashboard}
               showDashboard={showDashboard}
+              theme={theme}
             />
           </div>
           
