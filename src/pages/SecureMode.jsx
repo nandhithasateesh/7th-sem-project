@@ -154,7 +154,17 @@ const SecureMode = () => {
 
   const handleLeaveRoom = () => {
     if (socket && currentRoom) {
-      socket.emit('room:leave', { roomId: currentRoom.id })
+      socket.emit('room:leave', { 
+        roomId: currentRoom.id,
+        username: username,
+        userId: username,
+        isOwner: currentRoom.createdBy === username,
+        preserveRoom: true,
+        allowOwnerRejoin: true,
+        keepRoomActive: true,
+        isManualLeave: true, // This is a manual leave via button click
+        reason: 'manual_leave'
+      })
     }
     setCurrentRoom(null)
     setUsername(null)

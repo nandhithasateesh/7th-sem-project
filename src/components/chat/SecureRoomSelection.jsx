@@ -12,8 +12,7 @@ const SecureRoomSelection = ({ socket, onRoomJoined, theme, setTheme }) => {
     roomId: '',
     username: '',
     roomPassword: '',
-    timeLimit: '',
-    burnAfterReading: false
+    timeLimit: ''
   })
 
   // Join Room Form State
@@ -58,8 +57,7 @@ const SecureRoomSelection = ({ socket, onRoomJoined, theme, setTheme }) => {
       roomId: createForm.roomId.trim(),
       username: createForm.username.trim(),
       password: createForm.roomPassword,
-      timeLimit: parseInt(createForm.timeLimit),
-      burnAfterReading: createForm.burnAfterReading
+      timeLimit: parseInt(createForm.timeLimit)
     }
 
     console.log('[CLIENT] Creating secure room:', roomData.roomId)
@@ -70,7 +68,7 @@ const SecureRoomSelection = ({ socket, onRoomJoined, theme, setTheme }) => {
       
       if (response && response.success) {
         // Show Room ID to user
-        alert(`✅ Secure Room Created!\n\n🔑 Room ID: ${createForm.roomId} (host)\n🔒 Password: ${createForm.roomPassword}\n⏱️ Time Limit: ${createForm.timeLimit} minutes\n${createForm.burnAfterReading ? '🔥 Burn After Reading: Enabled' : ''}\n\n⚠️ IMPORTANT: Share Room ID and Password with others to let them join!`)
+        alert(`✅ Secure Room Created!\n\n🔑 Room ID: ${createForm.roomId} (host)\n🔒 Password: ${createForm.roomPassword}\n⏱️ Time Limit: ${createForm.timeLimit} minutes\n\n⚠️ IMPORTANT: Share Room ID and Password with others to let them join!`)
         
         // Join the room
         onRoomJoined(response.room, createForm.username)
@@ -278,25 +276,6 @@ const SecureRoomSelection = ({ socket, onRoomJoined, theme, setTheme }) => {
               <p className="text-xs text-gray-400 mt-1">Room will auto-delete after this time</p>
             </div>
 
-            <div className="bg-purple-500/10 border border-purple-500/30 rounded-lg p-4">
-              <label className="flex items-start gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={createForm.burnAfterReading}
-                  onChange={(e) => setCreateForm({ ...createForm, burnAfterReading: e.target.checked })}
-                  className="mt-1 w-5 h-5 text-purple-600 bg-slate-700 border-slate-600 rounded focus:ring-purple-500"
-                />
-                <div>
-                  <div className="flex items-center gap-2 text-white font-medium">
-                    <Flame className="w-4 h-4 text-orange-500" />
-                    Burn After Reading
-                  </div>
-                  <p className="text-xs text-gray-400 mt-1">
-                    Messages will auto-delete based on time limit
-                  </p>
-                </div>
-              </label>
-            </div>
           </div>
 
           <div className="flex gap-3 mt-6">

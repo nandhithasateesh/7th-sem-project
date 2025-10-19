@@ -213,18 +213,6 @@ const SettingsDashboard = ({ isOpen, onClose, mode, settings, onSettingsChange }
                     </p>
                   </div>
 
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-gray-300">Burn After Reading</p>
-                      <p className="text-xs text-gray-500">Messages vanish after viewing</p>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={settings.burnAfterReading || false}
-                      onChange={(e) => handleSettingChange('burnAfterReading', e.target.checked)}
-                      className="w-5 h-5"
-                    />
-                  </div>
 
                   <div className="flex items-center justify-between">
                     <div>

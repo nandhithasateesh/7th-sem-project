@@ -243,7 +243,15 @@ export const addMessage = (roomId, message, mode = 'normal') => {
     pinned: false,
     read: true,
     burnAfterReading: message.burnAfterReading || false,
-    expiresAt // Auto-calculated based on room settings
+    expiresAt, // Auto-calculated based on room settings
+    // Preserve system message flags for proper styling
+    isRoomCreation: message.isRoomCreation || false,
+    isUserJoin: message.isUserJoin || false,
+    isUserLeave: message.isUserLeave || false,
+    isHostLeave: message.isHostLeave || false,
+    isUserKick: message.isUserKick || false,
+    isScreenshotAlert: message.isScreenshotAlert || false,
+    isDownloadNotification: message.isDownloadNotification || false
   };
 
   if (mode === 'normal') {

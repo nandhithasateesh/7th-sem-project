@@ -41,6 +41,8 @@ const ChatWindow = ({ socket, room, user, mode = 'normal', theme = 'dark' }) => 
   const [previewModal, setPreviewModal] = useState(null)
   const [filePreviewModal, setFilePreviewModal] = useState(null)
   
+  // Secure Mode - View Once tracking for files (not audio/video)
+  const [viewedFiles, setViewedFiles] = useState(new Set())
   
   // Normal Mode specific states
   const [roomMembers, setRoomMembers] = useState([])
@@ -191,6 +193,14 @@ const ChatWindow = ({ socket, room, user, mode = 'normal', theme = 'dark' }) => 
 
     // Listen for new messages
     socket.on('message:new', (message) => {
+      console.log(`[CLIENT] Received message:new event:`, {
+        messageId: message.id,
+        type: message.type,
+        sender: message.username,
+        currentUser: user?.username,
+        mode: mode,
+        roomId: room?.id
+      });
       
       setMessages(prev => {
         const newMessages = [...prev, message]
@@ -222,10 +232,18 @@ const ChatWindow = ({ socket, room, user, mode = 'normal', theme = 'dark' }) => 
       }
     })
 
-    // Listen for user join notifications (prevent duplicates)
+    // Listen for user join notifications 
     socket.off('user:joined') // Remove any existing listeners first
-    socket.on('user:joined', ({ username, userId }) => {
-      // Prevent duplicate messages by checking if message already exists
+    socket.on('user:joined', ({ username, userId, message }) => {
+      // For secure mode, server sends proper system messages, so we don't need to create client-side messages
+      if (mode === 'secure') {
+        // Server already handles system messages for secure mode
+        // Just scroll to bottom when someone joins
+        scrollToBottom()
+        return
+      }
+      
+      // For normal mode, create client-side join message (legacy behavior)
       setMessages(prev => {
         const isDuplicate = prev.some(msg => 
           msg.type === 'system' && 
@@ -247,10 +265,18 @@ const ChatWindow = ({ socket, room, user, mode = 'normal', theme = 'dark' }) => 
       })
     })
 
-    // Listen for user leave notifications (prevent duplicates)
+    // Listen for user leave notifications
     socket.off('user:left') // Remove any existing listeners first
-    socket.on('user:left', ({ username, userId }) => {
-      // Prevent duplicate messages by checking if message already exists
+    socket.on('user:left', ({ username, userId, message }) => {
+      // For secure mode, server sends proper system messages, so we don't need to create client-side messages
+      if (mode === 'secure') {
+        // Server already handles system messages for secure mode
+        // Just scroll to bottom when someone leaves
+        scrollToBottom()
+        return
+      }
+      
+      // For normal mode, create client-side leave message (legacy behavior)
       setMessages(prev => {
         const isDuplicate = prev.some(msg => 
           msg.type === 'system' && 
@@ -312,13 +338,16 @@ const ChatWindow = ({ socket, room, user, mode = 'normal', theme = 'dark' }) => 
       })
     })
 
-    // Online users
+    // Online users (only process in normal mode)
     socket.on('room:online-users', (users) => {
-      setOnlineUsers(users || [])
+      if (mode === 'normal') {
+        setOnlineUsers(users || [])
+      }
+      // In secure mode, ignore online users for privacy
     })
 
     // Room expiry
-    socket.on('room:expired', ({ roomId: expiredRoomId, roomName }) => {
+    socket.on('room:expired', ({ roomId: expiredRoomId, message }) => {
       if (room.id === expiredRoomId) {
         // Show alert and handle redirect based on mode
         alert('⏰ Room has expired and been deleted.')
@@ -334,6 +363,38 @@ const ChatWindow = ({ socket, room, user, mode = 'normal', theme = 'dark' }) => 
       }
     })
 
+    // Room deleted by host
+    socket.on('room:deleted-by-host', ({ roomId: deletedRoomId, hostName, message }) => {
+      if (room.id === deletedRoomId) {
+        // Show alert and handle redirect based on mode
+        alert(`👑 Room has been deleted because the host (${hostName}) left.`)
+        
+        // Redirect based on mode
+        if (mode === 'secure') {
+          // For secure mode, go back to secure mode landing page
+          window.location.href = '/secure'
+        } else {
+          // For normal mode, go back to normal mode (no chat)
+          window.location.href = '/normal'
+        }
+      }
+    })
+
+    // User kicked from room
+    socket.on('user:kicked', ({ reason }) => {
+      // Show alert and handle redirect based on mode
+      alert(`🚫 ${reason}`)
+      
+      // Redirect based on mode
+      if (mode === 'secure') {
+        // For secure mode, go back to secure mode landing page
+        window.location.href = '/secure'
+      } else {
+        // For normal mode, go back to normal mode (no chat)
+        window.location.href = '/normal'
+      }
+    })
+
     return () => {
       socket.off('message:new')
       socket.off('message:deleted')
@@ -346,6 +407,8 @@ const ChatWindow = ({ socket, room, user, mode = 'normal', theme = 'dark' }) => 
       socket.off('user:stopped-recording')
       socket.off('room:online-users')
       socket.off('room:expired')
+      socket.off('room:deleted-by-host')
+      socket.off('user:kicked')
     }
   }, [socket, room])
 
@@ -392,50 +455,72 @@ const ChatWindow = ({ socket, room, user, mode = 'normal', theme = 'dark' }) => 
     return () => clearInterval(cleanupInterval)
   }, [mode])
 
-  // Handle room leave on component unmount (room change)
+  // Screenshot detection is handled by ScreenshotDetection component in SecureMode.jsx
+
+  // Handle room leave on component unmount (room change) - DISABLED FOR SECURE MODE
   useEffect(() => {
+    // Skip automatic cleanup for secure mode - users should only leave manually
+    if (mode === 'secure') {
+      return () => {
+        // No automatic leave for secure mode
+        console.log('[SECURE MODE] Skipping automatic room leave on component unmount')
+      }
+    }
+    
     return () => {
       if (room?.id && socket && user) {
         
-        // Emit leave event with room preservation settings
+        // Emit leave event with room preservation settings (Normal mode only)
         const isRoomOwner = room.createdBy === user.username
         socket.emit('room:leave', {
           roomId: room.id,
           username: user.username,
           userId: user.id,
           isOwner: isRoomOwner,
-          preserveRoom: true, // Always preserve room - don't destroy when anyone leaves
-          allowOwnerRejoin: true, // Allow owner to rejoin later
-          keepRoomActive: true // Keep room active for remaining users
+          preserveRoom: mode === 'normal', // Only preserve room in normal mode
+          allowOwnerRejoin: mode === 'normal', // Only allow rejoin in normal mode
+          keepRoomActive: mode === 'normal', // Only keep active in normal mode
+          isManualLeave: false, // This is automatic cleanup, not manual leave
+          reason: 'component_unmount'
         })
         
-        // Handle burn after reading cleanup
-        if (room.burnAfterReading) {
+        // Handle burn after reading cleanup (not in secure mode)
+        if (mode !== 'secure' && room.burnAfterReading) {
           permanentlyDeleteMessages(room.id)
         }
       }
     }
-  }, [room?.id])
+  }, [room?.id, mode])
 
-  // Handle page unload/refresh as leave events
+  // Handle page unload/refresh as leave events - DISABLED FOR SECURE MODE
   useEffect(() => {
+    // Skip page unload handling for secure mode - rely on disconnect handler instead
+    if (mode === 'secure') {
+      console.log('[SECURE MODE] Skipping page unload leave handler')
+      return () => {
+        // No cleanup needed for secure mode
+      }
+    }
+    
     const handleBeforeUnload = () => {
       if (room?.id && socket && user) {
         
-        // Emit leave event (synchronous) with room preservation settings
+        // Emit leave event (synchronous) with room preservation settings (Normal mode only)
         const isRoomOwner = room.createdBy === user.username
         socket.emit('room:leave', {
           roomId: room.id,
           username: user.username,
           userId: user.id,
           isOwner: isRoomOwner,
-          preserveRoom: true, // Always preserve room - don't destroy when anyone leaves
-          allowOwnerRejoin: true, // Allow owner to rejoin later
-          keepRoomActive: true // Keep room active for remaining users
+          preserveRoom: mode === 'normal', // Only preserve room in normal mode
+          allowOwnerRejoin: mode === 'normal', // Only allow rejoin in normal mode
+          keepRoomActive: mode === 'normal', // Only keep active in normal mode
+          isManualLeave: false, // This is automatic cleanup, not manual leave
+          reason: 'page_unload'
         })
         
-        // Handle burn after reading cleanup
-        if (room.burnAfterReading) {
+        // Handle burn after reading cleanup (not in secure mode)
+        if (mode !== 'secure' && room.burnAfterReading) {
           permanentlyDeleteMessages(room.id)
         }
       }
@@ -443,7 +528,7 @@ const ChatWindow = ({ socket, room, user, mode = 'normal', theme = 'dark' }) => 
 
     window.addEventListener('beforeunload', handleBeforeUnload)
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
-  }, [room?.id, socket, user])
+  }, [room?.id, socket, user, mode])
 
   // Get room members (Normal Mode only)
   useEffect(() => {
@@ -603,8 +688,18 @@ const ChatWindow = ({ socket, room, user, mode = 'normal', theme = 'dark' }) => 
           timestamp: new Date().toISOString()
         }
 
+        console.log(`[CLIENT] Sending file message:`, {
+          type: messageData.type,
+          fileName: messageData.fileName,
+          roomId: messageData.roomId,
+          mode: mode,
+          sender: user?.username
+        });
+
         socket.emit('message:send', messageData, (response) => {
+          console.log(`[CLIENT] File message send response:`, response);
           if (response && response.success) {
+            console.log(`[CLIENT] File message sent successfully, message ID: ${response.message?.id}`);
           } else {
             console.error('[CHAT] Failed to send file message:', response?.error)
             alert(`Failed to send file: ${response?.error || 'Unknown error'}`)
@@ -767,6 +862,21 @@ const ChatWindow = ({ socket, room, user, mode = 'normal', theme = 'dark' }) => 
 
 
   const handleOpenFilePreview = (message) => {
+    // Check if in secure mode and file is not audio/video
+    if (mode === 'secure' && message.type === 'file') {
+      const fileId = message.id || message.fileUrl
+      
+      // Check if file has already been viewed
+      if (viewedFiles.has(fileId)) {
+        // Show "already viewed" message instead of opening preview
+        alert('🔒 File already viewed\n\nThis file can only be viewed once in secure mode. You have already opened this file.')
+        return
+      }
+      
+      // Mark file as viewed
+      setViewedFiles(prev => new Set([...prev, fileId]))
+    }
+    
     setFilePreviewModal(message)
   }
 
@@ -781,12 +891,38 @@ const ChatWindow = ({ socket, room, user, mode = 'normal', theme = 'dark' }) => 
     link.click()
     document.body.removeChild(link)
 
-    // Emit download notification
-    if (socket && room) {
+    // Emit download notification with all required parameters
+    if (socket && room && user) {
+      // Determine file type from file extension or MIME type
+      const getFileType = (fileName, fileUrl) => {
+        const extension = fileName.split('.').pop()?.toLowerCase() || '';
+        const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'];
+        const audioExts = ['mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a'];
+        const videoExts = ['mp4', 'avi', 'mov', 'wmv', 'flv', 'webm', 'mkv'];
+        const docExts = ['pdf', 'doc', 'docx', 'txt', 'rtf'];
+        
+        if (imageExts.includes(extension)) return 'image';
+        if (audioExts.includes(extension)) return 'audio';
+        if (videoExts.includes(extension)) return 'video';
+        if (docExts.includes(extension)) return 'document';
+        return 'file';
+      };
+
+      const fileType = getFileType(message.fileName || 'file', message.fileUrl);
+      
       socket.emit('file:downloaded', {
         roomId: room.id,
-        fileName: message.fileName || 'file'
-      })
+        messageId: message.id,
+        fileName: message.fileName || 'file',
+        fileType: fileType,
+        downloaderUsername: user.username || user.name
+      }, (response) => {
+        if (response && response.success) {
+          console.log('[DOWNLOAD] Notification sent successfully');
+        } else {
+          console.error('[DOWNLOAD] Failed to send notification:', response?.error);
+        }
+      });
     }
 
   }
@@ -799,21 +935,23 @@ const ChatWindow = ({ socket, room, user, mode = 'normal', theme = 'dark' }) => 
     if (!socket || !room || !user) return
     
     
-    // Emit leave room event with room preservation settings
+    // Emit leave room event with mode-specific settings
     const isRoomOwner = room.createdBy === user.username
     socket.emit('room:leave', {
       roomId: room.id,
       username: user.username,
       userId: user.id,
       isOwner: isRoomOwner,
-      preserveRoom: true, // Always preserve room - don't destroy when anyone leaves
-      allowOwnerRejoin: true, // Allow owner to rejoin later
-      keepRoomActive: true // Keep room active for remaining users
+      preserveRoom: mode === 'normal', // Only preserve room in normal mode
+      allowOwnerRejoin: mode === 'normal', // Only allow rejoin in normal mode
+      keepRoomActive: mode === 'normal', // Only keep active in normal mode
+      isManualLeave: true, // This is a manual leave via button click
+      reason: 'manual_leave'
     }, (response) => {
       if (response && response.success) {
         
-        // Trigger burn after reading cleanup if needed
-        if (room.burnAfterReading) {
+        // Trigger burn after reading cleanup if needed (not in secure mode)
+        if (mode !== 'secure' && room.burnAfterReading) {
           permanentlyDeleteMessages(room.id)
         }
         
@@ -832,7 +970,7 @@ const ChatWindow = ({ socket, room, user, mode = 'normal', theme = 'dark' }) => 
   // No storage conflicts, no hiding - just complete removal
   
   const permanentlyDeleteMessages = (roomId) => {
-    if (!room?.burnAfterReading || !roomId) return
+    if (!room?.burnAfterReading || !roomId || mode === 'secure') return
     
     
     // 1. Clear messages from React state
@@ -886,10 +1024,13 @@ const ChatWindow = ({ socket, room, user, mode = 'normal', theme = 'dark' }) => 
               </div>
             </div>
             
-            <div className="flex items-center gap-1 text-xs text-gray-400 flex-shrink-0">
-              <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-              <span>{onlineUsers.length}</span>
-            </div>
+            {/* Online users count - only show in normal mode */}
+            {mode === 'normal' && (
+              <div className="flex items-center gap-1 text-xs text-gray-400 flex-shrink-0">
+                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                <span>{onlineUsers.length}</span>
+              </div>
+            )}
           </div>
 
           {/* Controls Row - Mobile Optimized */}
@@ -1017,13 +1158,19 @@ const ChatWindow = ({ socket, room, user, mode = 'normal', theme = 'dark' }) => 
                     message.isScreenshotAlert 
                       ? 'bg-red-600/30 text-red-200 border-2 border-red-500/50 shadow-lg shadow-red-500/20 animate-pulse' 
                       : message.isDownloadNotification
-                      ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                      ? (message.isSecureMode 
+                        ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30 shadow-sm' 
+                        : 'bg-blue-500/20 text-blue-400 border border-blue-500/30')
                       : message.isRoomCreation
                       ? 'bg-green-500/20 text-green-400 border border-green-500/30'
                       : message.isUserJoin
                       ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
                       : message.isUserLeave
                       ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30'
+                      : message.isHostLeave
+                      ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'
+                      : message.isUserKick
+                      ? 'bg-red-500/20 text-red-400 border border-red-500/30'
                       : 'bg-slate-700/50 text-gray-400'
                   }`}>
                     <div className="flex flex-col items-center gap-1 text-center">
@@ -1059,9 +1206,9 @@ const ChatWindow = ({ socket, room, user, mode = 'normal', theme = 'dark' }) => 
                       message.userId === user.id
                         ? 'bg-primary text-white'
                         : theme === 'dark' ? 'bg-slate-800 text-gray-200' : 'bg-gray-100 text-gray-900'
-                    } ${(room?.burnAfterReading || message.burnAfterReading) ? 'border-2 border-orange-500/50' : ''}`}
+                    } ${(mode !== 'secure' && (room?.burnAfterReading || message.burnAfterReading)) ? 'border-2 border-orange-500/50' : ''}`}
                   >
-                    {(room?.burnAfterReading || message.burnAfterReading) && (
+                    {mode !== 'secure' && (room?.burnAfterReading || message.burnAfterReading) && (
                       <div className="flex items-center gap-1 mb-2 text-orange-400">
                         <Flame className="w-3 h-3" />
                         <span className="text-xs">Burn after reading</span>
@@ -1072,25 +1219,49 @@ const ChatWindow = ({ socket, room, user, mode = 'normal', theme = 'dark' }) => 
                     {/* File/Audio/Video Preview */}
                     {(message.type === 'file' || message.type === 'audio' || message.type === 'video') && message.fileUrl && (
                       <div className="mt-3 border-t border-gray-600 pt-3">
-                        {message.type === 'file' && (
-                          <div className="mt-3">
-                            <button
-                              onClick={() => handleOpenFilePreview(message)}
-                              className="flex items-center gap-3 w-full p-3 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors text-left"
-                            >
-                              <File className="w-6 h-6 text-blue-400 flex-shrink-0" />
-                              <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium text-blue-400 hover:text-blue-300 truncate">
-                                  📎 {message.fileName}
-                                </p>
-                                <p className="text-xs text-gray-400">
-                                  {message.fileSize ? `${(message.fileSize / 1024 / 1024).toFixed(2)} MB` : 'Unknown size'} • Click to preview
-                                </p>
-                              </div>
-                              <Eye className="w-4 h-4 text-gray-400" />
-                            </button>
-                          </div>
-                        )}
+                        {message.type === 'file' && (() => {
+                          const fileId = message.id || message.fileUrl
+                          const isViewed = mode === 'secure' && viewedFiles.has(fileId)
+                          
+                          return (
+                            <div className="mt-3">
+                              <button
+                                onClick={() => handleOpenFilePreview(message)}
+                                className={`flex items-center gap-3 w-full p-3 rounded-lg transition-colors text-left ${
+                                  isViewed 
+                                    ? 'bg-red-900/30 border border-red-500/30 cursor-not-allowed' 
+                                    : 'bg-slate-700 hover:bg-slate-600'
+                                }`}
+                                disabled={isViewed}
+                              >
+                                <File className={`w-6 h-6 flex-shrink-0 ${
+                                  isViewed ? 'text-red-400' : 'text-blue-400'
+                                }`} />
+                                <div className="flex-1 min-w-0">
+                                  <p className={`text-sm font-medium truncate ${
+                                    isViewed 
+                                      ? 'text-red-400' 
+                                      : 'text-blue-400 hover:text-blue-300'
+                                  }`}>
+                                    📎 {message.fileName}
+                                  </p>
+                                  <p className="text-xs text-gray-400">
+                                    {message.fileSize ? `${(message.fileSize / 1024 / 1024).toFixed(2)} MB` : 'Unknown size'} • {
+                                      isViewed 
+                                        ? 'Already viewed - Cannot open again' 
+                                        : 'Click to preview'
+                                    }
+                                  </p>
+                                </div>
+                                {isViewed ? (
+                                  <EyeOff className="w-4 h-4 text-red-400" />
+                                ) : (
+                                  <Eye className="w-4 h-4 text-gray-400" />
+                                )}
+                              </button>
+                            </div>
+                          )
+                        })()}
                         
                         {message.type === 'audio' && (
                           <div className="bg-slate-700 rounded-lg p-3">

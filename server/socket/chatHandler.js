@@ -124,32 +124,56 @@ export const setupChatHandlers = (io) => {
         const creationMessage = addMessage(room.id, {
           userId: 'system',
           username: 'System',
-          content: `🎉 Room created by ${username}`,
+          content: `🎉 Secure room "${roomId}" has been created by ${username}`,
           type: 'system',
           isRoomCreation: true
         }, 'secure');
         
-        // Emit initial online users count (just the creator)
-        io.to(room.id).emit('room:online-users', [{
-          userId: username,
-          username: username,
-          socketId: socket.id
-        }]);
+        // Broadcast room creation message to all users in room (just creator at this point)
+        io.to(room.id).emit('message:new', creationMessage);
         
-        // Start room expiry timer
-        setTimeout(() => {
-          const roomStillExists = getRoom(room.id, 'secure');
-          if (roomStillExists) {
-            deleteRoom(room.id, 'secure');
-            io.to(room.id).emit('room:expired', { roomId: room.id });
-            io.emit('room:removed', { roomId: room.id });
-            console.log(`[SECURE] Room ${room.id} expired after ${timeLimit} minutes`);
-          }
-        }, timeLimit * 60000);
-
         console.log(`[SECURE-CREATE] Room created: ${room.name} (ID: ${room.id}) by ${username}`);
         
+        // Send callback first
         callback({ success: true, room });
+        
+        // No online users count in secure mode for privacy
+        // setTimeout(() => {
+        //   io.to(room.id).emit('room:online-users', [{
+        //     userId: username,
+        //     username: username,
+        //     socketId: socket.id
+        //   }]);
+        //   console.log(`[SECURE-CREATE] Sent initial online users count to room ${room.id}`);
+        // }, 100);
+        
+        // Start room expiry timer
+        setTimeout(async () => {
+          const roomStillExists = getRoom(room.id, 'secure');
+          if (roomStillExists) {
+            console.log(`[SECURE] Room ${room.id} expiring after ${timeLimit} minutes - removing all members`);
+            
+            // Get all sockets in the room before deleting
+            const socketsInRoom = await io.in(room.id).fetchSockets();
+            
+            // Notify all members that room expired
+            io.to(room.id).emit('room:expired', { 
+              roomId: room.id,
+              message: 'Room has expired and been deleted'
+            });
+            
+            // Force disconnect all members from the room
+            socketsInRoom.forEach(memberSocket => {
+              memberSocket.leave(room.id);
+              console.log(`[SECURE-EXPIRE] Removed ${memberSocket.username} from expired room ${room.id}`);
+            });
+            
+            // Delete the room
+            deleteRoom(room.id, 'secure');
+            io.emit('room:removed', { roomId: room.id });
+            console.log(`[SECURE] Room ${room.id} expired and all ${socketsInRoom.length} members removed`);
+          }
+        }, timeLimit * 60000);
       } catch (error) {
         console.error('[SECURE-CREATE ERROR]', error);
         callback({ success: false, error: error.message });
@@ -282,37 +306,34 @@ export const setupChatHandlers = (io) => {
           console.log(`[SECURE-JOIN] Removed ${username} from left users list`);
         }
 
-        // Add system message for user joining (visible to everyone)
-        const joinMessage = addMessage(roomId, {
-          userId: 'system',
-          username: 'System',
-          content: `👋 ${username} joined the room`,
-          type: 'system',
-          isUserJoin: true
-        }, 'secure');
+        // For secure mode: Handle messages based on user type (NO join notifications)
+        let messages;
+        if (room.createdBy === username) {
+          // Room creator gets all messages (including room creation message)
+          messages = getMessages(roomId, 'secure');
+        } else {
+          // New users get no previous history and no join notifications
+          messages = [];
+        }
 
-        // Get messages AFTER adding the join message (so joining user gets it)
-        const messages = getMessages(roomId, 'secure');
-
-        // Notify OTHERS about the join (not the joining user - they get it in messages array)
-        socket.broadcast.to(roomId).emit('user:joined', {
-          userId: username,
-          username: username,
-          message: joinMessage
-        });
-
-        // Get online users in this room
-        const socketsInRoom = await io.in(roomId).fetchSockets();
-        const roomOnlineUsers = socketsInRoom.map(s => ({
-          userId: s.userId,
-          username: s.username,
-          socketId: s.id
-        })).filter(u => u.userId);
-
-        io.to(roomId).emit('room:online-users', roomOnlineUsers);
-
-        console.log(`[SECURE-JOIN SUCCESS] User ${username} joined room ${room.name}. ${roomOnlineUsers.length} users online`);
+        console.log(`[SECURE-JOIN SUCCESS] User ${username} joined room ${room.name}`);
+        
+        // Send response to joining user first (no join message notifications)
         callback({ success: true, room, messages });
+
+        // No online users count in secure mode for privacy
+        // setTimeout(async () => {
+        //   // Get online users in this room
+        //   const socketsInRoom = await io.in(roomId).fetchSockets();
+        //   const roomOnlineUsers = socketsInRoom.map(s => ({
+        //     userId: s.userId,
+        //     username: s.username,
+        //     socketId: s.id
+        //   })).filter(u => u.userId);
+
+        //   console.log(`[SECURE-JOIN] Broadcasting online users count: ${roomOnlineUsers.length} users`);
+        //   io.to(roomId).emit('room:online-users', roomOnlineUsers);
+        // }, 100); // Small delay to ensure proper synchronization
       } catch (error) {
         console.error('[SECURE-JOIN ERROR]', error);
         callback({ success: false, error: error.message });
@@ -572,7 +593,7 @@ export const setupChatHandlers = (io) => {
     });
 
     // Leave room
-    socket.on('room:leave', async ({ roomId, preserveRoom, allowOwnerRejoin, keepRoomActive }, callback) => {
+    socket.on('room:leave', async ({ roomId, preserveRoom, allowOwnerRejoin, keepRoomActive, isManualLeave, reason }, callback) => {
       try {
         const room = getRoom(roomId, socket.mode);
         
@@ -586,31 +607,16 @@ export const setupChatHandlers = (io) => {
         // Check if the leaving user is the host/creator
         const isHost = room.createdBy === socket.username || room.createdBy === socket.userId;
 
-        if (isHost && preserveRoom) {
-          // Host is leaving but room should be preserved
-          console.log(`[HOST-LEAVE] Host ${socket.username} leaving room ${roomId}. Room preserved for remaining users.`);
-          
-          // Just remove host from room members, don't delete room
-          removeMemberFromRoom(roomId, socket.username, socket.mode);
-          socket.leave(roomId);
-          
-          // Notify remaining users that host left but room continues
-          socket.to(roomId).emit('user:left', {
-            username: socket.username,
-            userId: socket.userId,
-            isHost: true,
-            roomPreserved: true
-          });
+        console.log(`[ROOM-LEAVE] User ${socket.username} leaving room ${roomId}. isHost: ${isHost}, preserveRoom: ${preserveRoom}, mode: ${socket.mode}`);
 
-          console.log(`[HOST-LEAVE] Host ${socket.username} left room ${roomId} but room preserved`);
+        // In secure mode, host leaving should ALWAYS delete the room
+        if (isHost && socket.mode === 'secure') {
+          // SECURE MODE: Host leaving always deletes room and kicks all members
+          console.log(`[SECURE-HOST-LEAVE] Host ${socket.username} leaving secure room ${roomId}. Deleting room and removing all members...`);
           
-          if (callback && typeof callback === 'function') {
-            callback({ success: true, hostLeft: true, roomPreserved: true });
-          }
-          return;
-        } else if (isHost) {
-          // Host is leaving - delete room and kick everyone out (old behavior)
-          console.log(`[HOST-LEAVE] Host ${socket.username} leaving room ${roomId}. Deleting room...`);
+          // Get all sockets in the room before deleting
+          const socketsInRoom = await io.in(roomId).fetchSockets();
+          console.log(`[SECURE-HOST-LEAVE] Found ${socketsInRoom.length} members in room ${roomId}`);
           
           // Notify all members in the room BEFORE they leave
           io.to(roomId).emit('room:deleted-by-host', {
@@ -618,6 +624,19 @@ export const setupChatHandlers = (io) => {
             hostName: socket.username,
             message: 'Room has been deleted because the host left'
           });
+
+          console.log(`[SECURE-HOST-LEAVE] Sent room:deleted-by-host event to all members in room ${roomId}`);
+
+          // Give clients time to process the event before disconnecting them
+          setTimeout(() => {
+            // Force disconnect all members from the room
+            socketsInRoom.forEach(memberSocket => {
+              if (memberSocket.id !== socket.id) { // Don't disconnect the host socket twice
+                memberSocket.leave(roomId);
+                console.log(`[SECURE-HOST-LEAVE] Removed ${memberSocket.username} from room ${roomId} (host left)`);
+              }
+            });
+          }, 500); // 500ms delay to ensure clients receive the event
 
           // Cancel any existing timers
           if (roomOfflineTimers.has(roomId)) {
@@ -628,11 +647,96 @@ export const setupChatHandlers = (io) => {
           // Delete the room
           deleteRoom(roomId, socket.mode);
           io.emit('room:removed', { roomId });
+          
+          console.log(`[SECURE-HOST-LEAVE] Room ${roomId} deleted and all ${socketsInRoom.length} members removed`);
 
-          console.log(`[HOST-LEAVE] Room ${roomId} deleted by host ${socket.username}`);
+          if (callback && typeof callback === 'function') {
+            callback({ success: true, hostLeft: true, roomDeleted: true });
+          }
+          return;
+        } else if (isHost && preserveRoom) {
+          // NORMAL MODE: Host is leaving but room should be preserved
+          console.log(`[HOST-LEAVE] Host ${socket.username} leaving room ${roomId}. Room preserved for remaining users.`);
+          
+          // No host leave notifications in secure mode
+          let hostLeaveMessage = null;
+          if (socket.mode !== 'secure') {
+            // Add system message for host leaving (normal mode only)
+            hostLeaveMessage = addMessage(roomId, {
+              userId: 'system',
+              username: 'System',
+              content: `👑 Host ${socket.username} has left the room (room continues)`,
+              type: 'system',
+              isHostLeave: true
+            }, socket.mode);
+            
+            // Notify remaining users that host left but room continues - send as chat message
+            socket.to(roomId).emit('message:new', hostLeaveMessage);
+            
+            // Also emit user:left event for any additional UI updates
+            socket.to(roomId).emit('user:left', {
+              username: socket.username,
+              userId: socket.userId,
+              isHost: true,
+              roomPreserved: true,
+              message: hostLeaveMessage
+            });
+          } else {
+            // For secure mode, no leave notifications at all
+            console.log(`[SECURE-HOST-LEAVE] Host ${socket.username} left room ${roomId} silently (${reason || 'unknown reason'}) - no notification sent`);
+          }
+          
+          // Just remove host from room members, don't delete room
+          removeMemberFromRoom(roomId, socket.username, socket.mode);
+          socket.leave(roomId);
+
+          console.log(`[HOST-LEAVE] Host ${socket.username} left room ${roomId} but room preserved`);
           
           if (callback && typeof callback === 'function') {
-            callback({ success: true, hostLeft: true });
+            callback({ success: true, hostLeft: true, roomPreserved: true });
+          }
+          return;
+        } else if (isHost) {
+          // NORMAL MODE: Host is leaving and room should be deleted (preserveRoom is false)
+          console.log(`[HOST-LEAVE] Host ${socket.username} leaving normal room ${roomId}. Deleting room and removing all members...`);
+          
+          // Get all sockets in the room before deleting
+          const socketsInRoom = await io.in(roomId).fetchSockets();
+          
+          // Notify all members in the room BEFORE they leave
+          io.to(roomId).emit('room:deleted-by-host', {
+            roomId: roomId,
+            hostName: socket.username,
+            message: 'Room has been deleted because the host left'
+          });
+
+          console.log(`[HOST-LEAVE] Sent room:deleted-by-host event to all members in room ${roomId}`);
+
+          // Give clients time to process the event before disconnecting them
+          setTimeout(() => {
+            // Force disconnect all members from the room
+            socketsInRoom.forEach(memberSocket => {
+              if (memberSocket.id !== socket.id) { // Don't disconnect the host socket twice
+                memberSocket.leave(roomId);
+                console.log(`[HOST-LEAVE] Removed ${memberSocket.username} from room ${roomId} (host left)`);
+              }
+            });
+          }, 500); // 500ms delay to ensure clients receive the event
+
+          // Cancel any existing timers
+          if (roomOfflineTimers.has(roomId)) {
+            clearTimeout(roomOfflineTimers.get(roomId));
+            roomOfflineTimers.delete(roomId);
+          }
+
+          // Delete the room
+          deleteRoom(roomId, socket.mode);
+          io.emit('room:removed', { roomId });
+          
+          console.log(`[HOST-LEAVE] Room ${roomId} deleted and all ${socketsInRoom.length} members removed`);
+          
+          if (callback && typeof callback === 'function') {
+            callback({ success: true, hostLeft: true, roomDeleted: true });
           }
           return;
         }
@@ -670,22 +774,31 @@ export const setupChatHandlers = (io) => {
           timestamp: new Date().toISOString()
         });
         
-        // Add system message for user leaving
-        const leaveMessage = addMessage(roomId, {
-          userId: 'system',
-          username: 'System',
-          content: `👋 ${socket.username} left the room`,
-          type: 'system',
-          isUserLeave: true
-        }, socket.mode);
+        // No leave notifications in secure mode at all
+        let leaveMessage = null;
+        if (socket.mode !== 'secure') {
+          // Add system message for user leaving (normal mode only)
+          leaveMessage = addMessage(roomId, {
+            userId: 'system',
+            username: 'System',
+            content: `❌ ${socket.username} has left the room`,
+            type: 'system',
+            isUserLeave: true
+          }, socket.mode);
 
-        // Notify others BEFORE removing user
-        // Use io.to instead of socket.broadcast because user needs to leave first
-        socket.to(roomId).emit('user:left', {
-          userId: socket.userId,
-          username: socket.username,
-          message: leaveMessage
-        });
+          // Notify others BEFORE removing user - send as chat message
+          socket.to(roomId).emit('message:new', leaveMessage);
+          
+          // Also emit user:left event for any additional UI updates
+          socket.to(roomId).emit('user:left', {
+            userId: socket.userId,
+            username: socket.username,
+            message: leaveMessage
+          });
+        } else {
+          // For secure mode, no leave notifications at all
+          console.log(`[SECURE-LEAVE] User ${socket.username} left room ${roomId} silently (${reason || 'unknown reason'}) - no notification sent`);
+        }
 
         // Remove user from room members
         removeMemberFromRoom(roomId, socket.username, socket.mode);
@@ -836,6 +949,13 @@ export const setupChatHandlers = (io) => {
           expiresAt
         }, socket.mode);
 
+        // Check if sender is in the room (debugging)
+        const socketsInRoom = io.sockets.adapter.rooms.get(roomId);
+        const senderInRoom = socketsInRoom && socketsInRoom.has(socket.id);
+        console.log(`[MESSAGE:SEND] Sender ${socket.username} in room ${roomId}: ${senderInRoom}`);
+        console.log(`[MESSAGE:SEND] Room ${roomId} has ${socketsInRoom ? socketsInRoom.size : 0} sockets`);
+
+        // Broadcast to all users in the room (should include sender)
         io.to(roomId).emit('message:new', message);
 
         console.log(`[MESSAGE:SEND] Message sent to room ${roomId} by ${socket.username}`);
@@ -1100,16 +1220,20 @@ export const setupChatHandlers = (io) => {
           console.log(`[KICK] ${username} already in left users list, skipping duplicate`);
         }
         
+        // Add system message for user being kicked
+        const kickMessage = addMessage(roomId, {
+          userId: 'system',
+          username: 'System',
+          content: `🚫 ${username} was removed from the secure room by host ${socket.username}`,
+          type: 'system',
+          isUserKick: true
+        }, socket.mode);
+        
         // Notify others in room
         io.to(roomId).emit('user:left', {
           userId: userId,
           username: username,
-          message: {
-            id: `kick-${Date.now()}`,
-            type: 'system',
-            content: `⚠️ ${username} was kicked by ${socket.username}`,
-            timestamp: new Date().toISOString()
-          }
+          message: kickMessage
         });
         
         // Update dashboard for all users in room
@@ -1329,7 +1453,7 @@ export const setupChatHandlers = (io) => {
         const alertMessage = {
           id: `screenshot-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           type: 'system',
-          content: `🚨 ${username} took screenshot`,
+          content: `🚨 ${username} tried to take a screenshot`,
           timestamp: timestamp,
           isScreenshotAlert: true,
           method: method,
@@ -1341,16 +1465,27 @@ export const setupChatHandlers = (io) => {
         console.log(`[SCREENSHOT ALERT] Users in room ${roomId}:`, socketsInRoom.length);
         console.log(`[SCREENSHOT ALERT] User details:`, socketsInRoom.map(s => ({ id: s.id, username: s.username })));
 
+        // Add message to room history
+        const savedMessage = addMessage(roomId, {
+          userId: 'system',
+          username: 'System',
+          content: `🚨 ${username} tried to take a screenshot`,
+          type: 'system',
+          isScreenshotAlert: true,
+          method: method,
+          attemptedBy: username
+        }, socket.mode);
+
         // Send alert to all users in the room (single broadcast)
         io.to(roomId).emit('screenshot:alert', {
           username,
           method,
           timestamp,
-          message: alertMessage
+          message: savedMessage
         });
 
         // Send as a regular message to chat (single broadcast)
-        io.to(roomId).emit('message:new', alertMessage);
+        io.to(roomId).emit('message:new', savedMessage);
 
         console.log(`[SCREENSHOT ALERT] Alert sent to ${socketsInRoom.length} users in room ${roomId}`);
         console.log(`[SCREENSHOT ALERT] Message content:`, alertMessage);
@@ -1492,21 +1627,51 @@ export const setupChatHandlers = (io) => {
           icon = '📄';
         }
 
+        // Get room to check mode
+        const room = getRoom(roomId, socket.mode);
+        const isSecureMode = socket.mode === 'secure';
+        
+        // Create more descriptive messages for secure mode
+        let content;
+        if (isSecureMode) {
+          const fileTypeText = fileType === 'image' ? 'image' : 
+                              fileType === 'audio' ? 'audio file' :
+                              fileType === 'video' ? 'video' :
+                              fileType === 'document' || fileType === 'pdf' ? 'document' : 'file';
+          content = `${icon} ${downloaderUsername} downloaded this ${fileTypeText}: ${fileName}`;
+        } else {
+          content = `${icon} ${downloaderUsername} downloaded ${fileName}`;
+        }
+
         const downloadMessage = {
           id: `download-${Date.now()}`,
           type: 'system',
-          content: `${icon} ${downloaderUsername} downloaded ${fileName}`,
+          content: content,
           timestamp: new Date().toISOString(),
           isDownloadNotification: true,
           fileName: fileName,
           fileType: fileType,
-          downloaderUsername: downloaderUsername
+          downloaderUsername: downloaderUsername,
+          isSecureMode: isSecureMode
         };
 
         console.log(`[DOWNLOAD] Created download message:`, downloadMessage);
 
+        // Add download notification to message history
+        const savedMessage = addMessage(roomId, {
+          userId: 'system',
+          username: 'System',
+          content: content,
+          type: 'system',
+          isDownloadNotification: true,
+          fileName: fileName,
+          fileType: fileType,
+          downloaderUsername: downloaderUsername,
+          isSecureMode: isSecureMode
+        }, socket.mode);
+
         // Broadcast download notification to all users in the room
-        io.to(roomId).emit('message:new', downloadMessage);
+        io.to(roomId).emit('message:new', savedMessage);
         console.log(`[DOWNLOAD] Broadcasted to room ${roomId} - message sent to all clients`);
         
         // Send success response back to client
@@ -1514,6 +1679,121 @@ export const setupChatHandlers = (io) => {
       } catch (error) {
         console.error('[DOWNLOAD ERROR]', error);
         if (callback) callback({ success: false, error: error.message });
+      }
+    });
+
+    // Handle socket disconnection
+    socket.on('disconnect', async (reason) => {
+      try {
+        console.log(`[DISCONNECT] Socket ${socket.id} disconnected. Reason: ${reason}, User: ${socket.username}, Mode: ${socket.mode}`);
+        
+        if (!socket.username || !socket.mode) {
+          console.log(`[DISCONNECT] Socket had no username or mode, skipping cleanup`);
+          return;
+        }
+
+        // Find all rooms this socket was in
+        const rooms = Array.from(socket.rooms).filter(room => room !== socket.id);
+        
+        for (const roomId of rooms) {
+          const room = getRoom(roomId, socket.mode);
+          if (!room) continue;
+
+          console.log(`[DISCONNECT] Processing disconnect for user ${socket.username} from room ${roomId}`);
+
+          // For secure mode, we need to be more careful about disconnect handling
+          if (socket.mode === 'secure') {
+            // Check if this is the host
+            const isHost = room.createdBy === socket.username || room.createdBy === socket.userId;
+            
+            if (isHost) {
+              // Host disconnected - start a timer to delete room if they don't reconnect
+              console.log(`[DISCONNECT] Host ${socket.username} disconnected from secure room ${roomId}`);
+              
+              // Set a 30-second timer for host to reconnect
+              const timerId = setTimeout(async () => {
+                // Check if host has reconnected
+                const socketsInRoom = await io.in(roomId).fetchSockets();
+                const hostReconnected = socketsInRoom.some(s => s.username === socket.username);
+                
+                if (!hostReconnected) {
+                  console.log(`[DISCONNECT] Host ${socket.username} did not reconnect, deleting room ${roomId}`);
+                  
+                  // Notify all members that room is being deleted due to host disconnect
+                  io.to(roomId).emit('room:deleted-by-host', {
+                    roomId: roomId,
+                    hostName: socket.username,
+                    message: 'Room has been deleted because the host disconnected'
+                  });
+                  
+                  // Delete the room
+                  deleteRoom(roomId, socket.mode);
+                  io.emit('room:removed', { roomId });
+                }
+                
+                roomOfflineTimers.delete(`host-disconnect-${roomId}`);
+              }, 30000); // 30 seconds
+              
+              roomOfflineTimers.set(`host-disconnect-${roomId}`, timerId);
+            } else {
+              // Regular member disconnected - just remove them silently
+              // Don't send leave notification for disconnects, only for manual leaves
+              console.log(`[DISCONNECT] Member ${socket.username} disconnected from secure room ${roomId} - removing silently`);
+              
+              removeMemberFromRoom(roomId, socket.username, socket.mode);
+              
+              // Update online users count
+              const socketsInRoom = await io.in(roomId).fetchSockets();
+              const roomOnlineUsers = socketsInRoom.map(s => ({
+                userId: s.userId,
+                username: s.username,
+                socketId: s.id
+              })).filter(u => u.userId);
+              
+              io.to(roomId).emit('room:online-users', roomOnlineUsers);
+              
+              // If room becomes empty, start deletion timer
+              if (roomOnlineUsers.length === 0) {
+                console.log(`[DISCONNECT] Secure room ${roomId} is now empty after disconnect. Starting 10-minute deletion timer...`);
+                
+                const timerId = setTimeout(() => {
+                  const socketsInRoomNow = io.sockets.adapter.rooms.get(roomId);
+                  if (!socketsInRoomNow || socketsInRoomNow.size === 0) {
+                    const roomStillExists = getRoom(roomId, 'secure');
+                    if (roomStillExists) {
+                      deleteRoom(roomId, 'secure');
+                      io.emit('room:removed', { roomId });
+                      console.log(`[DISCONNECT] Empty secure room ${roomId} deleted after 10 minutes`);
+                    }
+                  }
+                  roomOfflineTimers.delete(roomId);
+                }, 10 * 60 * 1000); // 10 minutes
+                
+                roomOfflineTimers.set(roomId, timerId);
+              }
+            }
+          } else {
+            // Normal mode - handle disconnect normally
+            removeMemberFromRoom(roomId, socket.username, socket.mode);
+            
+            // Send leave notification for normal mode
+            const leaveMessage = addMessage(roomId, {
+              userId: 'system',
+              username: 'System',
+              content: `${socket.username} disconnected`,
+              type: 'system',
+              isUserLeave: true
+            }, socket.mode);
+            
+            socket.to(roomId).emit('user:left', {
+              userId: socket.userId,
+              username: socket.username,
+              message: leaveMessage
+            });
+          }
+        }
+      } catch (error) {
+        console.error('[DISCONNECT ERROR]', error);
       }
     });
   });

@@ -69,6 +69,8 @@ export const decryptSecureMessage = (encryptedMessage, roomId, password, twoFact
 
 // Production-Ready Screenshot Detection System
 export const detectScreenshot = (callback) => {
+  console.log('[detectScreenshot] 🚀 Function called with callback:', typeof callback);
+  
   let isInitialLoad = true;
   let lastTriggerTime = 0;
   let wasVisible = !document.hidden;
@@ -77,16 +79,20 @@ export const detectScreenshot = (callback) => {
   
   // Trigger callback with cooldown protection
   const triggerDetection = () => {
+    console.log('[detectScreenshot] 🔥 triggerDetection called!');
     const now = Date.now();
     if (now - lastTriggerTime < TRIGGER_COOLDOWN) {
+      console.log('[detectScreenshot] ⏰ Cooldown active, ignoring trigger');
       return; // Cooldown period - ignore repeated triggers
     }
     lastTriggerTime = now;
+    console.log('[detectScreenshot] ✅ Calling callback function...');
     callback();
   };
   
   // Initialize after page load
   setTimeout(() => {
+    console.log('[detectScreenshot] ⏰ Initialization timeout complete - detection now active');
     isInitialLoad = false;
     
     // Polling for visibility changes (catches PrtSc better than events)
@@ -122,22 +128,50 @@ export const detectScreenshot = (callback) => {
   const handleKeyPress = (e) => {
     if (isInitialLoad) return;
     
+    console.log('[Screenshot Debug] Key pressed:', {
+      key: e.key,
+      keyCode: e.keyCode,
+      code: e.code,
+      metaKey: e.metaKey,
+      shiftKey: e.shiftKey,
+      altKey: e.altKey
+    });
+    
     const isMacScreenshot = e.metaKey && e.shiftKey && ['3', '4', '5'].includes(e.key);
     const isWindowsSnip = e.metaKey && e.shiftKey && (e.key === 's' || e.key === 'S');
     const isPrintScreen = e.key === 'PrintScreen' || e.keyCode === 44 || e.code === 'PrintScreen';
     
     if (isPrintScreen || isMacScreenshot || isWindowsSnip) {
+      console.log('[Screenshot Debug] Screenshot key detected!', { isPrintScreen, isMacScreenshot, isWindowsSnip });
       triggerDetection();
     }
   };
 
-  // BACKUP: Visibility change detection
+  // Additional keyup handler for PrintScreen (sometimes only triggers on keyup)
+  const handleKeyUp = (e) => {
+    if (isInitialLoad) return;
+    
+    const isPrintScreen = e.key === 'PrintScreen' || e.keyCode === 44 || e.code === 'PrintScreen';
+    
+    if (isPrintScreen) {
+      console.log('[Screenshot Debug] PrintScreen keyup detected!');
+      triggerDetection();
+    }
+  };
+
+  // BACKUP: Visibility change detection (catches PrintScreen when keyboard events fail)
   let lastVisibilityChange = Date.now();
   const handleVisibilityChange = () => {
     if (isInitialLoad) return;
     
     const now = Date.now();
     const timeSinceLastChange = now - lastVisibilityChange;
+    
+    console.log('[Screenshot Debug] Visibility change detected:', {
+      hidden: document.hidden,
+      timeSinceLastChange,
+      now
+    });
     
     // Only check if enough time has passed (avoid rapid repeated triggers)
     if (document.hidden && timeSinceLastChange > 200) {
@@ -147,8 +181,11 @@ export const detectScreenshot = (callback) => {
         if (!document.hidden) {
           const hiddenDuration = Date.now() - hideTime;
           
-          // Very brief visibility loss = likely screenshot
+          console.log('[Screenshot Debug] Visibility restored after:', hiddenDuration + 'ms');
+          
+          // Very brief visibility loss = likely screenshot (PrintScreen often causes 100-300ms blur)
           if (hiddenDuration >= 50 && hiddenDuration <= 700) {
+            console.log('[Screenshot Debug] Brief visibility loss detected - likely PrintScreen!');
             triggerDetection();
           }
           document.removeEventListener('visibilitychange', checkVisible);
@@ -208,6 +245,7 @@ export const detectScreenshot = (callback) => {
 
   // Add event listeners
   document.addEventListener('keydown', handleKeyPress);
+  document.addEventListener('keyup', handleKeyUp); // Added for PrintScreen
   document.addEventListener('keyup', handleUserGesture);
   document.addEventListener('visibilitychange', handleVisibilityChange);
   window.addEventListener('blur', handleBlur);
@@ -220,10 +258,13 @@ export const detectScreenshot = (callback) => {
   
   detectScreenCapture();
 
+  console.log('[Screenshot Detection] All event listeners added - monitoring active');
+
   // Cleanup function - properly removes all listeners
   return () => {
     if (pollInterval) clearInterval(pollInterval);
     document.removeEventListener('keydown', handleKeyPress);
+    document.removeEventListener('keyup', handleKeyUp); // Added cleanup
     document.removeEventListener('keyup', handleUserGesture);
     document.removeEventListener('visibilitychange', handleVisibilityChange);
     window.removeEventListener('blur', handleBlur);
@@ -231,5 +272,6 @@ export const detectScreenshot = (callback) => {
     document.removeEventListener('click', updateInteraction);
     document.removeEventListener('keydown', updateInteraction);
     document.removeEventListener('touchstart', updateInteraction);
+    console.log('[Screenshot Detection] All event listeners removed');
   };
 };
