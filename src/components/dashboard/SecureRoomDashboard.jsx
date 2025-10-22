@@ -23,6 +23,7 @@ const SecureRoomDashboard = ({ socket, user, currentRoom, theme = 'dark' }) => {
   const [roomDetails, setRoomDetails] = useState(null)
   const [showHostDetails, setShowHostDetails] = useState(true)
   const [members, setMembers] = useState([])
+  const [leftUsers, setLeftUsers] = useState([])
   const [failedAttempts, setFailedAttempts] = useState([])
   const [attendanceLog, setAttendanceLog] = useState([])
   const [isLoading, setIsLoading] = useState(true)
@@ -39,6 +40,7 @@ const SecureRoomDashboard = ({ socket, user, currentRoom, theme = 'dark' }) => {
         const roomData = response.room
         setRoomDetails(roomData)
         setMembers(roomData.members || [])
+        setLeftUsers(roomData.leftUsers || [])
         setFailedAttempts(roomData.failedAttempts || [])
         setAttendanceLog(roomData.attendanceLog || [])
         setIsLoading(false) // Data loaded, stop loading state
@@ -55,6 +57,14 @@ const SecureRoomDashboard = ({ socket, user, currentRoom, theme = 'dark' }) => {
           const newMembers = updatedData.members || []
           if (JSON.stringify(prev) !== JSON.stringify(newMembers)) {
             return newMembers
+          }
+          return prev
+        })
+        
+        setLeftUsers(prev => {
+          const newLeftUsers = updatedData.leftUsers || []
+          if (JSON.stringify(prev) !== JSON.stringify(newLeftUsers)) {
+            return newLeftUsers
           }
           return prev
         })
@@ -91,14 +101,29 @@ const SecureRoomDashboard = ({ socket, user, currentRoom, theme = 'dark' }) => {
       setMembers(prev => prev.filter(m => m !== username))
     }
 
+    // Handle real-time user count updates
+    const handleOnlineUsersUpdate = (onlineUsers) => {
+      const usernames = onlineUsers.map(user => user.username).filter(Boolean)
+      setMembers(prev => {
+        // Only update if the list actually changed
+        const currentUsernames = prev.filter(Boolean)
+        if (JSON.stringify(currentUsernames.sort()) !== JSON.stringify(usernames.sort())) {
+          return usernames
+        }
+        return prev
+      })
+    }
+
     socket.on('dashboard:secure-room-update', handleRoomUpdate)
     socket.on('user:joined', handleUserJoined)
     socket.on('user:left', handleUserLeft)
+    socket.on('room:online-users', handleOnlineUsersUpdate)
 
     return () => {
       socket.off('dashboard:secure-room-update', handleRoomUpdate)
       socket.off('user:joined', handleUserJoined)
       socket.off('user:left', handleUserLeft)
+      socket.off('room:online-users', handleOnlineUsersUpdate)
     }
   }, [socket, currentRoom])
 
@@ -237,14 +262,25 @@ const SecureRoomDashboard = ({ socket, user, currentRoom, theme = 'dark' }) => {
               </p>
             </div>
 
-            {/* Total Members */}
+            {/* Active Members */}
             <div className={`${theme === 'dark' ? 'bg-slate-700/50' : 'bg-gray-100'} rounded-lg p-3`}>
               <div className="flex items-center gap-2 mb-1">
                 <Users className="w-4 h-4 text-blue-400" />
-                <span className={`text-xs ${theme === 'dark' ? 'text-gray-400' : 'text-gray-600'}`}>Members</span>
+                <span className={`text-xs ${theme === 'dark' ? 'text-gray-400' : 'text-gray-600'}`}>Active</span>
               </div>
               <p className={`text-lg font-bold ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>
                 {members.length}
+              </p>
+            </div>
+
+            {/* Total Users (Active + Left) */}
+            <div className={`${theme === 'dark' ? 'bg-slate-700/50' : 'bg-gray-100'} rounded-lg p-3`}>
+              <div className="flex items-center gap-2 mb-1">
+                <Activity className="w-4 h-4 text-green-400" />
+                <span className={`text-xs ${theme === 'dark' ? 'text-gray-400' : 'text-gray-600'}`}>Total Users</span>
+              </div>
+              <p className={`text-lg font-bold ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>
+                {members.length + leftUsers.length}
               </p>
             </div>
 
@@ -296,7 +332,7 @@ const SecureRoomDashboard = ({ socket, user, currentRoom, theme = 'dark' }) => {
                 <div>
                   <h4 className={`text-sm font-semibold ${theme === 'dark' ? 'text-gray-300' : 'text-gray-700'} mb-3 flex items-center gap-2`}>
                     <Users className="w-4 h-4 text-blue-400" />
-                    Room Members ({members.length}) - Kick Management
+                    Active Members ({members.length}) - Kick Management
                   </h4>
                   <div className="space-y-2">
                     {members.length > 0 ? (
@@ -330,6 +366,40 @@ const SecureRoomDashboard = ({ socket, user, currentRoom, theme = 'dark' }) => {
                     ) : (
                       <p className={`text-sm ${theme === 'dark' ? 'text-gray-500' : 'text-gray-600'} text-center py-4`}>
                         No members in room
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Users Who Left */}
+                <div>
+                  <h4 className={`text-sm font-semibold ${theme === 'dark' ? 'text-gray-300' : 'text-gray-700'} mb-3 flex items-center gap-2`}>
+                    <LogOut className="w-4 h-4 text-orange-400" />
+                    Users Who Left ({leftUsers.length})
+                  </h4>
+                  <div className="space-y-2 max-h-48 overflow-y-auto">
+                    {leftUsers.length > 0 ? (
+                      leftUsers.map((leftUser, idx) => (
+                        <div 
+                          key={idx}
+                          className={`flex items-center justify-between p-3 ${theme === 'dark' ? 'bg-orange-500/10 border border-orange-500/30' : 'bg-orange-50 border border-orange-200'} rounded-lg`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <UserX className="w-4 h-4 text-orange-400" />
+                            <div>
+                              <span className={`text-sm ${theme === 'dark' ? 'text-orange-300' : 'text-orange-700'}`}>
+                                {leftUser.username}
+                              </span>
+                              <p className={`text-xs ${theme === 'dark' ? 'text-gray-400' : 'text-gray-600'}`}>
+                                {leftUser.reason === 'disconnected' ? 'Disconnected' : 'Left manually'} • {new Date(leftUser.leftAt).toLocaleString()}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <p className={`text-sm ${theme === 'dark' ? 'text-gray-500' : 'text-gray-600'} text-center py-4`}>
+                        No users have left yet
                       </p>
                     )}
                   </div>

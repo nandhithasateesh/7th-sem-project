@@ -48,57 +48,107 @@ const ScreenshotDetection = ({ socket, room, user, mode, onScreenshotDetected })
     
     const friendlyMethod = methodDescriptions[method] || method
 
+    // Remove any existing overlay first
+    const existingOverlay = document.getElementById('screenshot-blocked-overlay')
+    if (existingOverlay) {
+      existingOverlay.remove()
+    }
+
     // Show black screen overlay with blocked message
     const overlay = document.createElement('div')
     overlay.id = 'screenshot-blocked-overlay'
     overlay.style.cssText = `
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100vw;
-      height: 100vh;
-      background-color: black;
-      color: white;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      align-items: center;
-      z-index: 9999;
-      font-family: Arial, sans-serif;
-      font-size: 2rem;
-      font-weight: bold;
-      text-align: center;
+      position: fixed !important;
+      top: 0 !important;
+      left: 0 !important;
+      width: 100vw !important;
+      height: 100vh !important;
+      background-color: black !important;
+      color: white !important;
+      display: flex !important;
+      flex-direction: column !important;
+      justify-content: center !important;
+      align-items: center !important;
+      z-index: 99999 !important;
+      font-family: Arial, sans-serif !important;
+      font-size: 2rem !important;
+      font-weight: bold !important;
+      text-align: center !important;
+      pointer-events: auto !important;
     `
     overlay.innerHTML = `
-      <div>🚫 SCREENSHOT BLOCKED</div>
-      <div style="font-size: 1.2rem; margin-top: 20px; font-weight: normal;">
+      <div style="font-size: 2rem; font-weight: bold; margin-bottom: 20px;">🚫 SCREENSHOT BLOCKED</div>
+      <div style="font-size: 1.2rem; margin-bottom: 20px; font-weight: normal;">
         Screenshots are not allowed in secure mode
+      </div>
+      <div style="font-size: 1rem; opacity: 0.7;">
+        Screen will return to normal in 3 seconds...
       </div>
     `
     
+    // Add click handler to manually close overlay
+    overlay.addEventListener('click', () => {
+      // Clear the timeout
+      if (overlay.dataset.timeoutId) {
+        clearTimeout(parseInt(overlay.dataset.timeoutId))
+      }
+      overlay.remove()
+      console.log('[Screenshot] Overlay manually closed by user click')
+    })
+
+    // Add keyboard handler to close overlay with Escape key
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        // Clear the timeout
+        if (overlay.dataset.timeoutId) {
+          clearTimeout(parseInt(overlay.dataset.timeoutId))
+        }
+        overlay.remove()
+        document.removeEventListener('keydown', handleKeyDown)
+        console.log('[Screenshot] Overlay closed with Escape key')
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+
     document.body.appendChild(overlay)
     console.log('[Screenshot] Black overlay added to page')
     
-    // Remove overlay after 3 seconds
-    setTimeout(() => {
+    // Remove overlay after 3 seconds with better cleanup
+    const removeTimeout = setTimeout(() => {
       const overlayElement = document.getElementById('screenshot-blocked-overlay')
       if (overlayElement) {
+        overlayElement.style.display = 'none'
         overlayElement.remove()
-        console.log('[Screenshot] Overlay removed')
+        console.log('[Screenshot] Overlay removed successfully after timeout')
+      } else {
+        console.log('[Screenshot] Overlay element not found for removal')
       }
     }, 3000)
 
+    // Store timeout reference for cleanup
+    overlay.dataset.timeoutId = removeTimeout
+
+    // Fallback: Force remove overlay after 5 seconds if still present
+    setTimeout(() => {
+      const overlayElement = document.getElementById('screenshot-blocked-overlay')
+      if (overlayElement) {
+        overlayElement.style.display = 'none'
+        overlayElement.remove()
+        console.log('[Screenshot] Fallback: Force removed overlay after 5 seconds')
+      }
+    }, 5000)
+
     setDetectionCount(prev => prev + 1)
 
-    // Send message to room that this person tried to take screenshot
+    // Send screenshot detection alert to server
     if (socket && room) {
-      socket.emit('message:send', {
+      socket.emit('screenshot:detected', {
         roomId: room.id,
-        content: `📸 ${user.username} attempted to take a screenshot`,
-        type: 'system',
+        username: user.username,
+        method: method,
         timestamp: new Date().toISOString()
       })
-      console.log('[Screenshot] Message sent to room')
+      console.log('[Screenshot] Alert sent to server')
     }
 
     // Call parent callback
@@ -130,6 +180,17 @@ const ScreenshotDetection = ({ socket, room, user, mode, onScreenshotDetected })
     window.testScreenshotDetection = () => {
       console.log('[TEST] Manually triggering screenshot detection...')
       triggerScreenshotAlert('manual_test')
+    }
+
+    // Add function to force remove overlay if stuck
+    window.forceRemoveScreenshotOverlay = () => {
+      const overlay = document.getElementById('screenshot-blocked-overlay')
+      if (overlay) {
+        overlay.remove()
+        console.log('[TEST] Force removed screenshot overlay')
+      } else {
+        console.log('[TEST] No screenshot overlay found to remove')
+      }
     }
     
     // Call test function after a short delay
@@ -337,6 +398,17 @@ const ScreenshotDetection = ({ socket, room, user, mode, onScreenshotDetected })
     }
   }, [isSecureMode])
 
+
+  // Cleanup effect to remove any existing overlays when component unmounts
+  useEffect(() => {
+    return () => {
+      const existingOverlay = document.getElementById('screenshot-blocked-overlay')
+      if (existingOverlay) {
+        existingOverlay.remove()
+        console.log('[Screenshot] Cleanup: Removed existing overlay on component unmount')
+      }
+    }
+  }, [])
 
   if (!isSecureMode) return null
 

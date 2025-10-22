@@ -1174,8 +1174,51 @@ export const setupChatHandlers = (io) => {
         const socketsInRoom = await io.in(roomId).fetchSockets();
         const targetSocket = socketsInRoom.find(s => s.userId === userId || s.username === username);
         
-        if (!targetSocket) {
+        // Check if user is already in left users list
+        const leftUsers = roomLeftUsers.get(roomId) || [];
+        const userAlreadyLeft = leftUsers.some(leftUser => leftUser.username === username);
+        
+        if (!targetSocket && !userAlreadyLeft) {
           return callback({ success: false, error: 'User not found in room' });
+        }
+        
+        // If user has already left, just update the reason and return success
+        if (userAlreadyLeft) {
+          // Update the left user's reason to 'kicked'
+          const updatedLeftUsers = leftUsers.map(leftUser => 
+            leftUser.username === username 
+              ? { ...leftUser, reason: 'kicked', kickedBy: socket.username, leftAt: new Date().toISOString() }
+              : leftUser
+          );
+          roomLeftUsers.set(roomId, updatedLeftUsers);
+          
+          // Add to attendance log
+          if (!room.attendanceLog) {
+            room.attendanceLog = [];
+          }
+          room.attendanceLog.push({
+            username: username,
+            action: 'kicked',
+            kickedBy: socket.username,
+            timestamp: new Date().toISOString()
+          });
+          
+          // Notify dashboard about the update
+          const dashboardData = {
+            roomId: roomId,
+            activeUsers: socketsInRoom.map(s => ({
+              userId: s.userId,
+              username: s.username,
+              socketId: s.id
+            })).filter(u => u.userId),
+            leftUsers: updatedLeftUsers,
+            failedAttempts: roomFailedAttempts.get(roomId) || [],
+            attendanceLog: room.attendanceLog || []
+          };
+          
+          io.to(roomId).emit('dashboard:secure-room-update', dashboardData);
+          
+          return callback({ success: true, message: 'User was already left, marked as kicked' });
         }
         
         // Remove user from room
@@ -1584,17 +1627,21 @@ export const setupChatHandlers = (io) => {
           .filter(member => member && typeof member === 'string' && member.length > 0)
           .filter(member => member.length < 50 && !/^[a-z0-9]{8,}$/.test(member)); // Filter out random IDs
 
+        // Get left users for this room
+        const leftUsers = roomLeftUsers.get(roomId) || [];
+        
         const roomData = {
           id: room.id,
           createdBy: room.createdBy,
           createdAt: room.createdAt,
           expiresAt: room.expiresAt,
           members: cleanMembers,
+          leftUsers: leftUsers,
           failedAttempts: cleanFailedAttempts,
           attendanceLog: cleanAttendanceLog
         };
 
-        console.log(`[SECURE-DASHBOARD] Room ${roomId} details provided to ${socket.username} (${cleanMembers.length} members, ${cleanFailedAttempts.length} failed attempts)`);
+        console.log(`[SECURE-DASHBOARD] Room ${roomId} details provided to ${socket.username} (${cleanMembers.length} members, ${leftUsers.length} left users, ${cleanFailedAttempts.length} failed attempts)`);
         callback({ success: true, room: roomData });
       } catch (error) {
         console.error('[SECURE-DASHBOARD ERROR]', error);
@@ -1736,11 +1783,26 @@ export const setupChatHandlers = (io) => {
               
               roomOfflineTimers.set(`host-disconnect-${roomId}`, timerId);
             } else {
-              // Regular member disconnected - just remove them silently
-              // Don't send leave notification for disconnects, only for manual leaves
-              console.log(`[DISCONNECT] Member ${socket.username} disconnected from secure room ${roomId} - removing silently`);
+              // Regular member disconnected - remove them and notify dashboard
+              console.log(`[DISCONNECT] Member ${socket.username} disconnected from secure room ${roomId} - removing and updating dashboard`);
               
-              removeMemberFromRoom(roomId, socket.username, socket.mode);
+              // Remove from room using userId (not username)
+              removeMemberFromRoom(roomId, socket.userId || socket.username, socket.mode);
+              
+              // Add to left users list for dashboard tracking
+              if (!roomLeftUsers.has(roomId)) {
+                roomLeftUsers.set(roomId, []);
+              }
+              const leftUsers = roomLeftUsers.get(roomId);
+              const leftUserEntry = {
+                username: socket.username,
+                leftAt: new Date().toISOString(),
+                reason: 'disconnected'
+              };
+              leftUsers.push(leftUserEntry);
+              roomLeftUsers.set(roomId, leftUsers);
+              
+              console.log(`[DISCONNECT] Added ${socket.username} to left users list for room ${roomId}. Total left users: ${leftUsers.length}`);
               
               // Update online users count
               const socketsInRoom = await io.in(roomId).fetchSockets();
@@ -1751,6 +1813,22 @@ export const setupChatHandlers = (io) => {
               })).filter(u => u.userId);
               
               io.to(roomId).emit('room:online-users', roomOnlineUsers);
+              
+              // Notify dashboard about user disconnect
+              const room = getRoom(roomId, 'secure');
+              if (room) {
+                const dashboardData = {
+                  roomId: roomId,
+                  activeUsers: roomOnlineUsers,
+                  leftUsers: leftUsers,
+                  failedAttempts: roomFailedAttempts.get(roomId) || [],
+                  attendanceLog: room.attendanceLog || []
+                };
+                
+                // Send update to dashboard for the host
+                io.to(roomId).emit('dashboard:secure-room-update', dashboardData);
+                console.log(`[DISCONNECT] Dashboard updated for room ${roomId} - user ${socket.username} disconnected. Active users: ${roomOnlineUsers.length}, Left users: ${leftUsers.length}`);
+              }
               
               // If room becomes empty, start deletion timer
               if (roomOnlineUsers.length === 0) {

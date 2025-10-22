@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Disconnect Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            text-align: center;
+        }
+        .test-button {
+            background: #ff6b6b;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 18px;
+            border-radius: 8px;
+            cursor: pointer;
+            margin: 10px;
+            transition: background 0.3s;
+        }
+        .test-button:hover {
+            background: #ff5252;
+        }
+        .instructions {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+        }
+        .status {
+            background: rgba(0, 0, 0, 0.2);
+            padding: 15px;
+            border-radius: 8px;
+            margin: 10px 0;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔒 Disconnect Test for Secure Mode</h1>
+        
+        <div class="instructions">
+            <h2>Test Instructions:</h2>
+            <p>1. Open this page in multiple browser tabs/windows</p>
+            <p>2. Go to Secure Mode in each tab</p>
+            <p>3. Create a room in one tab and join in others</p>
+            <p>4. Open the dashboard in the host tab</p>
+            <p>5. Close one of the user tabs</p>
+            <p>6. Check if the user appears in "Users Who Left" section</p>
+        </div>
+
+        <div class="status" id="status">
+            Ready to test disconnect functionality...
+        </div>
+
+        <button class="test-button" onclick="testDisconnect()">
+            Simulate Tab Close
+        </button>
+
+        <button class="test-button" onclick="testKick()">
+            Test Kick Function
+        </button>
+
+        <div class="instructions">
+            <h3>Expected Behavior:</h3>
+            <ul style="text-align: left; max-width: 600px; margin: 0 auto;">
+                <li>✅ When user closes tab, they should appear in "Users Who Left"</li>
+                <li>✅ Dashboard should show real-time updates</li>
+                <li>✅ Active member count should decrease</li>
+                <li>✅ Total users count should remain the same</li>
+                <li>✅ Kick button should work for users who already left</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        function testDisconnect() {
+            document.getElementById('status').innerHTML = 'Testing disconnect...<br>Close this tab to test automatic user removal';
+            
+            // Simulate a disconnect after 3 seconds
+            setTimeout(() => {
+                document.getElementById('status').innerHTML = 'Disconnect test completed. Check the dashboard in the host tab to see if the user appears in "Users Who Left" section.';
+            }, 3000);
+        }
+
+        function testKick() {
+            document.getElementById('status').innerHTML = 'Kick test: Try kicking a user who has already left the room. The system should handle it gracefully and mark them as "kicked" instead of showing an error.';
+        }
+
+        console.log('Disconnect test page loaded');
+        console.log('This page helps test the automatic user removal functionality');
+    </script>
+</body>
+</html>
